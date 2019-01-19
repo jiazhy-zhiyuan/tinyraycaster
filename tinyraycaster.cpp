@@ -18,8 +18,8 @@ struct Light {
     float intensity;
 };
 
-enum MaterialType { SLIGHTLY_GLOSSY, REFLECTION_REFRACTION };
 struct Material {
+    enum MaterialType { SLIGHTLY_GLOSSY, REFLECTION_REFRACTION, REFLECTION };
     Material(const MaterialType &mt, const float &r, const float &kd, const float &ks, const Vec3f &color, const float &spec) : type(mt), ior(r), Kd(kd), Ks(ks), diffuse(color), specular(spec) {}
     Material() : type(SLIGHTLY_GLOSSY), ior(1.5), Kd(0.8), Ks(0.2), diffuse(Vec3f(0.6, 0.7, 0.8)), specular(25.) {}
     MaterialType type;       // material properties
@@ -110,17 +110,31 @@ float fresnel(const Vec3f &I, const Vec3f &N, const float &ior) {
 }
 
 
-bool trace(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, float &dist, int &sphere_hit) {
-    sphere_hit = -1;
-    dist = std::numeric_limits<float>::max();
+bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, Vec3f &hit, Vec3f &N, Material &material) {
+    float spheres_dist = std::numeric_limits<float>::max();
     for (size_t i=0; i < spheres.size(); i++) {
         float dist_i;
-        if (spheres[i].intersect(orig, dir, dist_i) && dist_i < dist) {
-            sphere_hit = i;
-            dist = dist_i;
+        if (spheres[i].intersect(orig, dir, dist_i) && dist_i < spheres_dist) {
+            spheres_dist = dist_i;
+
+            hit = orig + dir*dist_i;
+            N = (hit - spheres[i].center).normalize();
+            material = spheres[i].material;
         }
     }
-    return sphere_hit >= 0;
+
+    float checkerboard_dist = std::numeric_limits<float>::max();
+    if (fabs(dir.y)>1e-3)  {
+        float d = -(orig.y+5)/dir.y;
+        if (d>0) checkerboard_dist = d;
+        if (checkerboard_dist<spheres_dist)  {
+            hit = orig + dir*checkerboard_dist;
+            N = Vec3f(0,1,0);
+            material.diffuse = (int(.3*hit.x+1000) + int(.3*hit.z)) & 1 ? Vec3f(1,1,1) : Vec3f(.5,.3,.3);
+        }
+    }
+
+    return std::min(spheres_dist, checkerboard_dist)<1000;
 }
 
 Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, const std::vector<Light> &lights, size_t depth) {
@@ -131,49 +145,43 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     Vec3f point, N;
     Material material;
 
-    float dist = std::numeric_limits<float>::max();
-    int sphere_hit = -1;
-    if (!trace(orig, dir, spheres, dist, sphere_hit)) {
-        float checkerboard_dist = std::numeric_limits<float>::max();
-        if (fabs(dir.y)<1e-3) return background_color;
-        checkerboard_dist = -(orig.y+5)/dir.y;
-        if (checkerboard_dist<0) return background_color;
-        point = orig + dir*checkerboard_dist;
-        if (fabs(point.x)>10 || fabs(point.z)>30) return background_color;
-        N = Vec3f(0,1,0);
-        material.diffuse = (int(.3*point.x+1000) + int(.3*point.z)) & 1 ? Vec3f(1,1,1) : Vec3f(1,.6,0);
-    } else {
-        point = orig + dir*dist;
-        N = (point - spheres[sphere_hit].center).normalize();
-        material = spheres[sphere_hit].material;
+    if (!scene_intersect(orig, dir, spheres, point, N, material)) {
+        return background_color;
     }
 
     switch (material.type) {
-        case REFLECTION_REFRACTION:
+        case Material::REFLECTION:
+            {
+                Vec3f reflectionDirection = reflect(dir, N).normalize();
+                Vec3f reflectionRayOrig = reflectionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
+                return cast_ray(reflectionRayOrig, reflectionDirection, spheres, lights, depth + 1) * .9;
+            }
+
+        case Material::REFLECTION_REFRACTION:
             {
                 Vec3f reflectionDirection = reflect(dir, N).normalize();
                 Vec3f refractionDirection = refract(dir, N, material.ior).normalize();
-                Vec3f reflectionRayOrig = reflectionDirection*N < 0 ? point - N*1e-5 : point + N*1e-5;
-                Vec3f refractionRayOrig = refractionDirection*N < 0 ? point - N*1e-5 : point + N*1e-5;
+                Vec3f reflectionRayOrig = reflectionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
+                Vec3f refractionRayOrig = refractionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
                 Vec3f reflectionColor = cast_ray(reflectionRayOrig, reflectionDirection, spheres, lights, depth + 1);
                 Vec3f refractionColor = cast_ray(refractionRayOrig, refractionDirection, spheres, lights, depth + 1);
                 float kr = fresnel(dir, N, material.ior);
                 return reflectionColor*kr + refractionColor*(1 - kr);  // the conservation of energy means that the transmittance can be obtained as 1-kr
             }
-        case SLIGHTLY_GLOSSY:
+        case Material::SLIGHTLY_GLOSSY:
             {
                 float diffuse_light_intensity = 0, specular_light_intensity = 0;
 
                 for (size_t i=0; i<lights.size(); i++) {
                     Vec3f light_dir = lights[i].position - point;
-                    float ligh_dist_squared = light_dir*light_dir;
+                    float light_distance = light_dir.norm();
                     light_dir.normalize();
 
                     {
-                        Vec3f test_point = dir*N < 0 ? point + N*1e-5 : point - N*1e-5; // offset the original point to avoid occlusion by the object itself
-                        float dist = std::numeric_limits<float>::max();
-                        int trash_sphere_hit;
-                        if (trace(test_point, light_dir, spheres, dist, trash_sphere_hit) && dist*dist < ligh_dist_squared) {
+                        Vec3f test_point = dir*N < 0 ? point + N*1e-3 : point - N*1e-3; // offset the original point to avoid occlusion by the object itself
+                        Vec3f tmppoint, tmpN;
+                        Material tmpmaterial;
+                        if (scene_intersect(test_point, light_dir, spheres, tmppoint, tmpN, tmpmaterial) && (tmppoint-test_point).norm() < light_distance) {
                             continue;
                         }
                     }
@@ -227,13 +235,15 @@ int main(int argc, char **argv) {
     std::vector<Sphere> spheres;
     std::vector<Light> lights;
 
-    Material rubber(SLIGHTLY_GLOSSY,      1.3, 0.8, 0.0, Vec3f(0.3, 0.3, 0.3), 25.);
-    Material metal(SLIGHTLY_GLOSSY,       1.3, 0.8, 0.4, Vec3f(0.75, 0.75, 0.9), 25.);
-    Material glass(REFLECTION_REFRACTION, 1.5, 0.8, 0.2, Vec3f(0.6, 0.7, 0.8), 25.);
+    Material rubber(Material::SLIGHTLY_GLOSSY,      1.3, 0.8, 0.05, Vec3f(0.9, 0.3, 0.3), 25.);
+    Material metal(Material::SLIGHTLY_GLOSSY,       1.3, 0.8, 0.8, Vec3f(.8, .8, .9), 55.);
+    Material glass(Material::REFLECTION_REFRACTION, 1.5, 0.8, 0.2, Vec3f(0.6, 0.7, 0.8), 25.);
+    Material mirror(Material::REFLECTION, 1.5, 0.8, 0.2, Vec3f(0.6, 0.7, 0.8), 25.);
 
     spheres.push_back(Sphere(Vec3f(-1  ,  0  , -12), 2  , metal));
     spheres.push_back(Sphere(Vec3f(3  ,  -2  , -12), 1.5  , rubber));
-    spheres.push_back(Sphere(Vec3f( 0.5, -.5, -8 ), 1.5, glass));
+    spheres.push_back(Sphere(Vec3f( 0.5, -1, -8 ), 1.5, glass));
+    spheres.push_back(Sphere(Vec3f(3, 3, -13 ), 2.5, mirror));
 
     lights.push_back(Light(Vec3f(-20, 70,  20), 0.5));
     lights.push_back(Light(Vec3f( 30, 50, -12), 0.3));
