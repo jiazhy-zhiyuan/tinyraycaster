@@ -1,5 +1,3 @@
-#ifndef __GEOMETRY_H__
-#define __GEOMETRY_H__
 #include <cmath>
 #include <vector>
 #include <cassert>
@@ -60,23 +58,6 @@ template<size_t DIM,typename T> vec<DIM,T> operator-(const vec<DIM,T> &lhs) {
     return lhs*T(-1);
 }
 
-template<size_t DIM,typename T,typename U> vec<DIM,T> operator/(vec<DIM,T> lhs, const U& rhs) {
-    for (size_t i=DIM; i--; lhs[i]/=rhs);
-    return lhs;
-}
-
-template<size_t LEN,size_t DIM,typename T> vec<LEN,T> embed(const vec<DIM,T> &v, T fill=1) {
-    vec<LEN,T> ret;
-    for (size_t i=LEN; i--; ret[i]=(i<DIM?v[i]:fill));
-    return ret;
-}
-
-template<size_t LEN,size_t DIM, typename T> vec<LEN,T> proj(const vec<DIM,T> &v) {
-    vec<LEN,T> ret;
-    for (size_t i=LEN; i--; ret[i]=v[i]);
-    return ret;
-}
-
 template <typename T> vec<3,T> cross(vec<3,T> v1, vec<3,T> v2) {
     return vec<3,T>(v1.y*v2.z - v1.z*v2.y, v1.z*v2.x - v1.x*v2.z, v1.x*v2.y - v1.y*v2.x);
 }
@@ -92,6 +73,4 @@ template <size_t DIM, typename T> std::ostream& operator<<(std::ostream& out, co
 
 typedef vec<3,  float> Vec3f;
 typedef vec<4,  float> Vec4f;
-
-#endif //__GEOMETRY_H__
 
