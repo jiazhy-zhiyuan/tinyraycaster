@@ -5,8 +5,6 @@
 #include <cassert>
 #include <iostream>
 
-template<size_t DimCols,size_t DimRows,typename T> class mat;
-
 template <size_t DIM, typename T> struct vec {
     vec() { for (size_t i=DIM; i--; data_[i] = T()); }
           T& operator[](const size_t i)       { assert(i<DIM); return data_[i]; }
