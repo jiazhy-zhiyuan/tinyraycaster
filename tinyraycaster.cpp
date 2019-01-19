@@ -49,12 +49,22 @@ struct Sphere {
     }
 
     bool intersect(const Vec3f &orig, const Vec3f &dir, float &tnear) const {
+    /*
         Vec3f L = orig - center;
         float a = dir*dir;
         float b = 2*(dir*L);
         float c = L*L - powf(radius, 2);
         float t0, t1;
         if (!solve_quadratic_equation(a, b, c, t0, t1)) return false;
+        */
+        Vec3f L = center - orig;
+        float tca = L*dir;
+        float d2 = L*L - tca*tca;
+        if (d2 > radius2) return false;
+        float thc = sqrtf(radius2 - d2);
+        t0 = tca - thc;
+        t1 = tca + thc;
+
         if (t0 < 0) t0 = t1;
         if (t0 < 0) return false;
         tnear = t0;
