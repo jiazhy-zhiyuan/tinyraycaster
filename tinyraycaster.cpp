@@ -19,13 +19,12 @@ struct Light {
 };
 
 struct Material {
-    enum MaterialType { SLIGHTLY_GLOSSY, REFLECTION_REFRACTION, REFLECTION };
-    Material(const MaterialType &mt, const float &r, const float &kd, const float &ks, const Vec3f &color, const float &spec) : type(mt), ior(r), Kd(kd), Ks(ks), diffuse(color), specular(spec) {}
-    Material() : type(SLIGHTLY_GLOSSY), ior(1.5), Kd(0.8), Ks(0.2), diffuse(Vec3f(0.6, 0.7, 0.8)), specular(25.) {}
-    MaterialType type;       // material properties
+    Material(const float &r, const float &kd, const float &ks, const float &kt, const Vec3f &color, const float &spec) : ior(r), Kd(kd), Ks(ks), Kt(kt), diffuse(color), specular(spec) {}
+    Material() : ior(1.5), Kd(0.3), Ks(0.2), Kt(0.5), diffuse(Vec3f(0.6, 0.7, 0.8)), specular(25.) {}
     float ior;               // refractive index
     float Kd;                // diffuse albedo
     float Ks;                // specular albedo
+    float Kt;                // refractive albedo
     Vec3f diffuse;
     float specular;
 };
@@ -148,6 +147,7 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     if (!scene_intersect(orig, dir, spheres, point, N, material)) {
         return background_color;
     }
+    /*
 
     switch (material.type) {
         case Material::REFLECTION:
@@ -194,6 +194,7 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
         default:
             assert(0);
     };
+    */
     return background_color;
 }
 
@@ -235,6 +236,7 @@ int main(int argc, char **argv) {
     std::vector<Sphere> spheres;
     std::vector<Light> lights;
 
+    /*
     Material rubber(Material::SLIGHTLY_GLOSSY,      1.3, 0.8, 0.05, Vec3f(0.9, 0.3, 0.3), 25.);
     Material metal(Material::SLIGHTLY_GLOSSY,       1.3, 0.8, 0.8, Vec3f(.8, .8, .9), 55.);
     Material glass(Material::REFLECTION_REFRACTION, 1.5, 0.8, 0.2, Vec3f(0.6, 0.7, 0.8), 25.);
@@ -244,6 +246,7 @@ int main(int argc, char **argv) {
     spheres.push_back(Sphere(Vec3f(3  ,  -2  , -12), 1.5  , rubber));
     spheres.push_back(Sphere(Vec3f( 0.5, -1, -8 ), 1.5, glass));
     spheres.push_back(Sphere(Vec3f(3, 3, -13 ), 2.5, mirror));
+    */
 
     lights.push_back(Light(Vec3f(-20, 70,  20), 0.5));
     lights.push_back(Light(Vec3f( 30, 50, -12), 0.3));
