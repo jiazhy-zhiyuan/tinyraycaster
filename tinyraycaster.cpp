@@ -3,14 +3,7 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
-
 #include "geometry.h"
-
-const int width  = 1024;
-const int height = 768;
-const int fov    = M_PI/2.;
-const Vec3f background_color = Vec3f(0.235294, 0.67451, 0.843137);
-const int max_depth = 4;
 
 struct Light {
     Light(const Vec3f &p, const float &i) : position(p), intensity(i) {}
@@ -19,13 +12,10 @@ struct Light {
 };
 
 struct Material {
-    Material(const float &r, const float &kd, const float &ks, const float &kr, const float &kt, const Vec3f &color, const float &spec) : ior(r), Kd(kd), Ks(ks), Kr(kr), Kt(kt), diffuse(color), specular(spec) {}
-    Material() : ior(0), Kd(1), Ks(0), Kr(0), Kt(0), diffuse(Vec3f(0.6, 0.7, 0.8)), specular(25.) {}
-    float ior;  // refractive index
-    float Kd;   // diffuse albedo
-    float Ks;   // specular albedo
-    float Kr;   // reflective albedo
-    float Kt;   // refractive albedo
+    Material(const float &r, const Vec4f &a, const Vec3f &color, const float &spec) : refractive_index(r), albedo(a), diffuse(color), specular(spec) {}
+    Material() : refractive_index(), albedo(1,0,0,0), diffuse(), specular() { }
+    float refractive_index;
+    Vec4f albedo;
     Vec3f diffuse;
     float specular;
 };
@@ -33,41 +23,16 @@ struct Material {
 struct Sphere {
     Sphere(const Vec3f &c, const float &r, const Material &m) : center(c), radius(r), material(m) {}
 
-    bool solve_quadratic_equation(const float &a, const float &b, const float &c, float &x0, float &x1) const {
-        float discr = b*b - 4*a*c;
-        if (discr < 0) return false;
-        else if (fabs(discr) < 1e-3) x0 = x1 = -0.5*b/a;
-        else {
-            float q = (b > 0) ?            // The well known solution (-b +- sqrt(b^2 - 4ac)) / 2a is known to be non-robust
-                -0.5*(b + sqrtf(discr)) :  // in computation when ac is very small compered to b^2,
-                -0.5*(b - sqrtf(discr));   // because one is subtracting two very similar values.
-            x0 = q / a;                    // It is better to use the lesser known solution 2c / (-b -+ sqrt(b^2 -4ac)) for the other root.
-            x1 = c / q;                    // here the computation of q ensures that we are not subtracting two similar values.
-        }
-        if (x0 > x1) std::swap(x0, x1);
-        return true;
-    }
-
-    bool intersect(const Vec3f &orig, const Vec3f &dir, float &tnear) const {
-    /*
-        Vec3f L = orig - center;
-        float a = dir*dir;
-        float b = 2*(dir*L);
-        float c = L*L - powf(radius, 2);
-        float t0, t1;
-        if (!solve_quadratic_equation(a, b, c, t0, t1)) return false;
-        */
+    bool intersect(const Vec3f &orig, const Vec3f &dir, float &t0) const {
         Vec3f L = center - orig;
         float tca = L*dir;
         float d2 = L*L - tca*tca;
-        if (d2 > radius2) return false;
-        float thc = sqrtf(radius2 - d2);
-        t0 = tca - thc;
-        t1 = tca + thc;
-
+        if (d2 > radius*radius) return false;
+        float thc = sqrtf(radius*radius - d2);
+        t0       = tca - thc;
+        float t1 = tca + thc;
         if (t0 < 0) t0 = t1;
         if (t0 < 0) return false;
-        tnear = t0;
         return true;
     }
 
@@ -76,19 +41,13 @@ struct Sphere {
     float radius;
 };
 
-template <typename t> t clamp(const t& low, const t& high, const t& value) {
-    return value < low ? low : (value > high ? high : value);
-}
-
-// Compute reflection direction
 Vec3f reflect(const Vec3f &I, const Vec3f &N) {
     return I - N*2.f*(I*N);
 }
 
-// Compute refraction direction using Snell's law
-Vec3f refract(const Vec3f &I, const Vec3f &N, const float &ior) {
-    float cosi = -clamp(-1.f, 1.f, I*N);
-    float etai = 1, etat = ior;
+Vec3f refract(const Vec3f &I, const Vec3f &N, const float &refractive_index) { // Snell's law
+    float cosi = - std::max(-1.f, std::min(1.f, I*N));
+    float etai = 1, etat = refractive_index;
     Vec3f n = N;
     if (cosi < 0) {                      // We need to handle with care the two possible situations:
         cosi = -cosi;                    //    - When the ray is inside the object
@@ -105,7 +64,6 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
         float dist_i;
         if (spheres[i].intersect(orig, dir, dist_i) && dist_i < spheres_dist) {
             spheres_dist = dist_i;
-
             hit = orig + dir*dist_i;
             N = (hit - spheres[i].center).normalize();
             material = spheres[i].material;
@@ -114,7 +72,7 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
 
     float checkerboard_dist = std::numeric_limits<float>::max();
     if (fabs(dir.y)>1e-3)  {
-        float d = -(orig.y+4)/dir.y;
+        float d = -(orig.y+4)/dir.y; // the checkerboard plane has equation y = -4
         Vec3f pt = orig + dir*d;
         if (d>0 && fabs(pt.x)<10 && pt.z<-10 && pt.z>-30 && d<spheres_dist)  {
             checkerboard_dist = d;
@@ -132,11 +90,11 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     Vec3f point, N;
     Material material;
 
-    if (depth > max_depth || !scene_intersect(orig, dir, spheres, point, N, material))
-        return background_color;
+    if (depth > 4 || !scene_intersect(orig, dir, spheres, point, N, material))
+        return Vec3f(0.2, 0.7, 0.8); // background color
 
     Vec3f reflectionDirection = reflect(dir, N).normalize();
-    Vec3f refractionDirection = refract(dir, N, material.ior).normalize();
+    Vec3f refractionDirection = refract(dir, N, material.refractive_index).normalize();
     Vec3f reflectionRayOrig = reflectionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
     Vec3f refractionRayOrig = refractionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
     Vec3f reflectionColor = cast_ray(reflectionRayOrig, reflectionDirection, spheres, lights, depth + 1);
@@ -156,11 +114,15 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
         diffuse_light_intensity  += lights[i].intensity * std::max(0.f, light_dir*N);
         specular_light_intensity += powf(std::max(0.f, -reflect(-light_dir, N)*dir), material.specular)*lights[i].intensity;
     }
-    return material.diffuse * diffuse_light_intensity * material.Kd + Vec3f(1., 1., 1.)*specular_light_intensity * material.Ks + reflectionColor*material.Kr + refractionColor*material.Kt;
+    return material.diffuse * diffuse_light_intensity * material.albedo[0] + Vec3f(1., 1., 1.)*specular_light_intensity * material.albedo[1] + reflectionColor*material.albedo[2] + refractionColor*material.albedo[3];
 }
 
 
 void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
+    const int width  = 1024;
+    const int height = 768;
+    const int fov    = M_PI/2.;
+
     std::vector<Vec3f> framebuffer(width*height);
 
     float scale = tan(fov/2.);
@@ -184,7 +146,7 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
         float max = std::max(c[0], std::max(c[1], c[2]));
         if (max>1) c = c/max;
         for (size_t j = 0; j<3; j++) {
-            ofs << (char)(255 * clamp(0.f, 1.f, framebuffer[i][j]));
+            ofs << (char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j])));
         }
     }
     ofs.close();
@@ -192,21 +154,21 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
 
 int main(int argc, char **argv) {
     std::vector<Sphere> spheres;
-    std::vector<Light> lights;
+    std::vector<Light>  lights;
 
-    Material ivory(0, .7, 0.3, 0.03, 0., Vec3f(1., 1., .8)*.4, 50.);
-    Material glass(1.5, 0, .5, .15, .7, Vec3f(0.6, 0.7, 0.8), 125.);
-    Material red_rubber(0, 0.8, 0.2, 0., 0, Vec3f(0.9, 0.3, 0.3), 25.);
-    Material mirror(0, 0.0, 10., .85, 0, Vec3f(1,1,1), 1425.);
+    Material      ivory(1.0, Vec4f(0.7,  0.3, 0.10, 0.0), Vec3f(0.4, 0.4, 0.3),   50.);
+    Material      glass(1.5, Vec4f(0.0,  0.5, 0.15, 0.7), Vec3f(0.6, 0.7, 0.8),  125.);
+    Material red_rubber(1.0, Vec4f(0.8,  0.2, 0.00, 0.0), Vec3f(0.9, 0.3, 0.3),   25.);
+    Material     mirror(1.0, Vec4f(0.0, 10.0, 0.85, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
 
-    spheres.push_back(Sphere(Vec3f(-3  ,  0  , -15), 2  , ivory));
-    spheres.push_back(Sphere(Vec3f(2  ,  -1  , -16), 2.5  , red_rubber));
-    spheres.push_back(Sphere(Vec3f(-0.5, -1.5, -11 ), 2, glass));
-    spheres.push_back(Sphere(Vec3f(6, 4, -15 ), 3, mirror));
+    spheres.push_back(Sphere(Vec3f(-3  ,  0  , -15), 2,   ivory));
+    spheres.push_back(Sphere(Vec3f( 2  , -1  , -16), 2.5, red_rubber));
+    spheres.push_back(Sphere(Vec3f(-0.5, -1.5, -11), 2,   glass));
+    spheres.push_back(Sphere(Vec3f( 6,    4,   -15), 3,    mirror));
 
     lights.push_back(Light(Vec3f(-20, 20,  20), 1.5));
     lights.push_back(Light(Vec3f( 30, 50, -12), 1.8));
-    lights.push_back(Light(Vec3f( 30, 20, 30),   1.7));
+    lights.push_back(Light(Vec3f( 30, 20,  30), 1.7));
 
     render(spheres, lights);
 
