@@ -95,10 +95,13 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
 
     Vec3f reflectionDirection = reflect(dir, N).normalize();
     Vec3f refractionDirection = refract(dir, N, material.refractive_index).normalize();
-    Vec3f reflectionRayOrig = reflectionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
-    Vec3f refractionRayOrig = refractionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
-    Vec3f reflectionColor = cast_ray(reflectionRayOrig, reflectionDirection, spheres, lights, depth + 1);
-    Vec3f refractionColor = cast_ray(refractionRayOrig, refractionDirection, spheres, lights, depth + 1);
+//  Vec3f reflectionRayOrig = reflectionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
+//  Vec3f refractionRayOrig = refractionDirection*N < 0 ? point - N*1e-3 : point + N*1e-3;
+//  Vec3f reflectionColor = cast_ray(reflectionRayOrig, reflectionDirection, spheres, lights, depth + 1);
+//  Vec3f refractionColor = cast_ray(refractionRayOrig, refractionDirection, spheres, lights, depth + 1);
+
+    Vec2f reflectionColor = cast_ray(point, reflectionDirection, spheres, lights, depth + 1);
+    Vec3f refractionColor = cast_ray(point, refractionDirection, spheres, lights, depth + 1);
 
     float diffuse_light_intensity = 0, specular_light_intensity = 0;
     for (size_t i=0; i<lights.size(); i++) {
